@@ -28,7 +28,7 @@ embedding = HuggingFaceEmbeddings(
 
 groq_chat = ChatGroq(
     groq_api_key=groq_api_key,
-    model_name="deepseek-r1-distill-llama-70b",
+    model_name="llama-3.3-70b-versatile",
     streaming=True  # Enable streaming here
 )
 
@@ -66,12 +66,14 @@ def build_rag_chain(index_name: str) -> RunnableGenerator:
     vectorstore = PineconeVectorStore(index=index, embedding=embedding)
     retriever = vectorstore.as_retriever()
 
-    return (
+    chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
         | prompt
         | groq_chat
         | StrOutputParser()
     )
+
+    return chain.with_config(config={"metadata": {"reasoning_format": "hidden"}})
 
 
 

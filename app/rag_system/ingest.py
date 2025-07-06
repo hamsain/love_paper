@@ -9,7 +9,7 @@ import os
 
 load_dotenv()
 api_key = os.environ['PINECONE_API_KEY']
-def do_ingest(uploadedDocName):
+def do_ingest(uploadedDocName, index_name):
     # Load PDF
     loaders = [
         PyPDFLoader(f"uploads/{uploadedDocName}")
@@ -24,7 +24,7 @@ def do_ingest(uploadedDocName):
     embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
     pc = Pinecone(api_key=api_key)
 
-    index_name = remove_extension(uploadedDocName)
+    index_name = index_name
     
     existing_indexes = [index_info["name"] for index_info in pc.list_indexes()]
     if index_name not in existing_indexes:

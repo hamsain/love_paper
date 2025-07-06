@@ -1,9 +1,11 @@
-from fastapi import FastAPI, Request, File, UploadFile
+from fastapi import FastAPI, Request, File, Form, UploadFile
 from app.api.routes import router as api_router
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from uuid import uuid4
+from pydantic import BaseModel
 from langserve import add_routes
+from app.api.db import database
 from app.rag_system import ingest
 
 from typing import AsyncIterator
@@ -22,6 +24,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
+
 UPLOAD_DIR = "uploads"
 ALLOWED_CONTENT_TYPES = {"application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}  # PDF, DOCX
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
@@ -35,8 +45,37 @@ def cleanup_file(file_path: str):
 def read_root():
     return {"message": "Welcome to the FastAPI workspace!"}
 
+class Topic(BaseModel):
+    category: str
+    index_name: str
+    db_type: str
+
+@app.get("/users")
+async def read_users():
+    query = "SELECT * FROM users"
+    results = await database.fetch_all(query)
+    return results
+
+@app.get("/topics")
+async def get_topics():
+    query = "SELECT * FROM data_topics"
+    results = await database.fetch_all(query)
+    return results
+
+@app.post("/add_topics")
+async def add_topic(topic: Topic):
+    query = """
+    INSERT INTO data_topics (category, index_name, db_type)
+    VALUES (:category, :index_name, :db_type)
+    """
+    await database.execute(query=query, values=topic.dict())
+    return {"message": "Topic added successfully"}
+
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    topic: str = Form(...),
+    db_type: str = Form(...)):
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file.content_type}")
 
@@ -47,14 +86,18 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Create a unique filename
     ext = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid4().hex}{ext}"
+    # base_name =f"{uuid4().hex}"
+    base_name ="pdfdata"
+    unique_filename = f"{base_name}{ext}"
     file_location = os.path.join(UPLOAD_DIR, unique_filename)
 
     # Save file
     with open(file_location, "wb") as f:
         f.write(contents)
 
-    vectorized_data = ingest.do_ingest(unique_filename)
+    index_name = f"{topic}-384"
+    if db_type == 'pinecone':
+        vectorized_data = ingest.do_ingest(unique_filename, index_name)
     
     return JSONResponse(content={
         "original_filename": file.filename,
@@ -62,7 +105,8 @@ async def upload_file(file: UploadFile = File(...)):
         "path": file_location,
         "content_type": file.content_type,
         "size_bytes": len(contents),
-        "vectorized_data": vectorized_data
+        "vectorized_data": vectorized_data,
+        "index_name": index_name
     })
 
 # from app.rag_system.rag_chain import rag_chain as paper_rag_chain
@@ -81,12 +125,6 @@ async def chat(request: Request):
 
     chain = dynamic_rag_chain.build_rag_chain(index_name)
 
-    # async def sse_stream():
-    #     async for chunk in chain.astream(question):
-    #         # SSE format: 'data: <your-data>\n\n'
-    #         yield f"data: {chunk}\n\n"
-
-    # return StreamingResponse(sse_stream(), media_type="text/event-stream")
 
     
     async def sse_json_stream():
@@ -96,8 +134,6 @@ async def chat(request: Request):
 
     return StreamingResponse(sse_json_stream(), media_type="text/event-stream")
 
-# Optional: add interactive playground at `/langserve`
-add_routes(app, dynamic_rag_chain.build_rag_chain("pertanian-384"), path="/langserve")
 
 if __name__ == "__main__":
     import uvicorn

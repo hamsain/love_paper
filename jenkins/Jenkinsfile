@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = 'chatapi-app-local'
+        CONTAINER_NAME = 'chatapi_app'
+    }
+
+    stages {
+        stage('Clone') {
+            steps {
+                git 'https://github.com/hamsain/love_paper.git'
+            }
+        }
+
+        stage('Run Tests') {
+            steps {
+                sh '''
+                    pip install -r requirements.txt
+                    pytest tests/
+                '''
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh 'docker build -t $IMAGE_NAME .'
+            }
+        }
+
+        stage('Deploy Locally') {
+            steps {
+                sh '''
+                    docker stop $CONTAINER_NAME || true
+                    docker rm $CONTAINER_NAME || true
+                    docker run -d --name $CONTAINER_NAME -p 8000:8000 $IMAGE_NAME
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
