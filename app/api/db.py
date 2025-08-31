@@ -1,5 +1,8 @@
+import os
 from databases import Database
 
-DATABASE_URL = "mysql+aiomysql://root:mypass@localhost:3307/genai"
+DB_HOST = os.getenv("MYSQL_HOST", "db") 
+
+DATABASE_URL = f"mysql+aiomysql://root:mypass@{DB_HOST}/genai"
 
 database = Database(DATABASE_URL)
